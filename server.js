@@ -9,5 +9,5 @@ const PORT = process.env.PORT || 5000;
 await connectDB();
 
 app.listen(PORT, () => {
-  console.log(`✅ Server running at http://localhost:${PORT}`);
+  console.log(`Server running at http://localhost:${PORT}`);
 });
