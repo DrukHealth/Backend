@@ -1,76 +1,65 @@
-import Scan from "../models/Scan.js";
-import mongoose from "mongoose";
+const CTGScan = require("../models/ctgScan");
+const moment = require("moment");
 
-/**
- * Create a scan from web app.
- * In your web app, call this after the user uploads/initiates a CTG scan.
- */
-export async function createScan(req, res) {
-  const { patientId, result, source } = req.body;
-  if (!patientId) return res.status(400).json({ ok: false, message: "patientId is required" });
+const createScan = async (req, res) => {
+  try {
+    if (!req.file || !req.file.path) {
+      return res.status(400).json({ message: "No image uploaded" });
+    }
 
-  const scan = await Scan.create({
-    patientId,
-    result: result || "Normal",
-    source: source || "web",
-    performedBy: req.user.id,
-    scannedAt: new Date()
-  });
+    const ctgDetected = req.body.result || "Normal";
+    const imageUrl = req.file.path;
 
-  res.status(201).json({ ok: true, scan });
-}
+    const scan = new CTGScan({ imageUrl, ctgDetected });
+    await scan.save();
 
-export async function listScans(req, res) {
-  const { page = 1, limit = 20 } = req.query;
-  const p = Math.max(parseInt(page), 1);
-  const l = Math.min(Math.max(parseInt(limit), 1), 100);
+    // ✅ Safe emit (only if io exists)
+    const io = req.app.get("io");
+    if (io) io.emit("new-scan", scan);
 
-  const [items, total] = await Promise.all([
-    Scan.find().sort({ scannedAt: -1 }).skip((p - 1) * l).limit(l),
-    Scan.countDocuments()
-  ]);
-
-  res.json({ ok: true, items, page: p, pages: Math.ceil(total / l), total });
-}
-
-/**
- * Stats endpoint: group by day/week/month/year using MongoDB dateTrunc (MongoDB 5.0+).
- * Query:
- *   /api/scans/stats?granularity=day&from=2025-01-01&to=2025-12-31
- *   granularity: day | week | month | year
- */
-export async function getStats(req, res) {
-  const { granularity = "day", from, to } = req.query;
-
-  const valid = ["day", "week", "month", "year"];
-  if (!valid.includes(granularity)) {
-    return res.status(400).json({ ok: false, message: "granularity must be day|week|month|year" });
+    res.status(201).json({
+      message: "CTG Scan uploaded successfully!",
+      scan,
+    });
+  } catch (error) {
+    console.error("Error uploading CTG scan:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
   }
+};
 
-  const match = {};
-  if (from || to) {
-    match.scannedAt = {};
-    if (from) match.scannedAt.$gte = new Date(from);
-    if (to) match.scannedAt.$lte = new Date(to);
+
+// 🟡 GET /api/scans
+const listScans = async (req, res) => {
+  try {
+    const scans = await CTGScan.find().sort({ date: -1 });
+    res.json(scans);
+  } catch (error) {
+    console.error("Error listing scans:", error);
+    res.status(500).json({ message: "Server error" });
   }
+};
 
-  const pipeline = [
-    { $match: match },
-    {
-      $group: {
-        _id: {
-          $dateTrunc: { date: "$scannedAt", unit: granularity, binSize: 1 }
-        },
-        count: { $sum: 1 }
-      }
-    },
-    { $project: { _id: 0, periodStart: "$_id", count: 1 } },
-    { $sort: { periodStart: 1 } }
-  ];
+// 🔵 GET /api/scans/stats
+const getStats = async (req, res) => {
+  try {
+    const now = moment();
+    const startOfDay = now.clone().startOf("day");
+    const startOfWeek = now.clone().startOf("week");
+    const startOfMonth = now.clone().startOf("month");
+    const startOfYear = now.clone().startOf("year");
 
-  // Fallback if MongoDB < 5 (no $dateTrunc) — optional:
-  // You can implement $dateToString format grouping by case.
+    const [daily, weekly, monthly, yearly] = await Promise.all([
+      CTGScan.countDocuments({ date: { $gte: startOfDay.toDate() } }),
+      CTGScan.countDocuments({ date: { $gte: startOfWeek.toDate() } }),
+      CTGScan.countDocuments({ date: { $gte: startOfMonth.toDate() } }),
+      CTGScan.countDocuments({ date: { $gte: startOfYear.toDate() } }),
+    ]);
 
-  const data = await Scan.aggregate(pipeline);
-  res.json({ ok: true, granularity, data });
-}
+    res.json({ daily, weekly, monthly, yearly });
+  } catch (error) {
+    console.error("Error getting stats:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+module.exports = { createScan, listScans, getStats };

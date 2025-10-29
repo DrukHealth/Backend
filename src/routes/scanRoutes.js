@@ -1,11 +1,15 @@
-import { Router } from "express";
-import { requireAuth } from "../middleware/auth.js";
-import { createScan, listScans, getStats } from "../controllers/scanController.js";
+const express = require("express");
+const multer = require("multer");
+const { storage } = require("../config/cloudinary");
+const { createScan, listScans, getStats } = require("../controllers/scanController");
 
-const router = Router();
+const router = express.Router();
+const upload = multer({ storage });
 
-router.post("/", requireAuth, createScan);      // create a CTG scan record
-router.get("/", requireAuth, listScans);        // list scans (paginated)
-router.get("/stats", requireAuth, getStats);    // stats by day/week/month/year
+// ✅ Make sure the field name matches the frontend exactly:
+router.post("/postCTG", upload.single("ctgImage"), createScan);
 
-export default router;
+router.get("/scans", listScans);
+router.get("/scans/stats", getStats);
+
+module.exports = router;
