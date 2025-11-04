@@ -39,27 +39,82 @@ const listScans = async (req, res) => {
   }
 };
 
-// 🔵 GET /api/scans/stats
+// const moment = require("moment");
+
 const getStats = async (req, res) => {
   try {
     const now = moment();
-    const startOfDay = now.clone().startOf("day");
-    const startOfWeek = now.clone().startOf("week");
-    const startOfMonth = now.clone().startOf("month");
-    const startOfYear = now.clone().startOf("year");
 
+    // ------------------------------
+    // Define precise time ranges
+    // ------------------------------
+    const startOfDay = now.clone().startOf("day").toDate();
+    const endOfDay = now.clone().endOf("day").toDate();
+
+    const startOfWeek = now.clone().startOf("isoWeek").toDate(); // Monday start
+    const endOfWeek = now.clone().endOf("isoWeek").toDate();
+
+    const startOfMonth = now.clone().startOf("month").toDate();
+    const endOfMonth = now.clone().endOf("month").toDate();
+
+    const startOfYear = now.clone().startOf("year").toDate();
+    const endOfYear = now.clone().endOf("year").toDate();
+
+    // ------------------------------
+    // Only valid NSP categories
+    // ------------------------------
+    const validCategories = ["Normal", "Suspect", "Pathological"];
+
+    // ------------------------------
+    // Count scans in each period (all scans included)
+    // ------------------------------
     const [daily, weekly, monthly, yearly] = await Promise.all([
-      CTGScan.countDocuments({ date: { $gte: startOfDay.toDate() } }),
-      CTGScan.countDocuments({ date: { $gte: startOfWeek.toDate() } }),
-      CTGScan.countDocuments({ date: { $gte: startOfMonth.toDate() } }),
-      CTGScan.countDocuments({ date: { $gte: startOfYear.toDate() } }),
+      CTGScan.countDocuments({ date: { $gte: startOfDay, $lte: endOfDay } }),
+      CTGScan.countDocuments({ date: { $gte: startOfWeek, $lte: endOfWeek } }),
+      CTGScan.countDocuments({ date: { $gte: startOfMonth, $lte: endOfMonth } }),
+      CTGScan.countDocuments({ date: { $gte: startOfYear, $lte: endOfYear } }),
     ]);
 
-    res.json({ daily, weekly, monthly, yearly });
+    // ------------------------------
+    // Count only valid NSP scans for pie chart
+    // ------------------------------
+    const [normalCount, suspectCount, pathologicalCount] = await Promise.all([
+      CTGScan.countDocuments({ ctgDetected: "Normal" }),
+      CTGScan.countDocuments({ ctgDetected: "Suspect" }),
+      CTGScan.countDocuments({ ctgDetected: "Pathological" }),
+    ]);
+
+    const totalNSP = normalCount + suspectCount + pathologicalCount;
+
+    // Percentages for pie chart only (avoid invalid scans)
+    const nspPercentages = totalNSP
+      ? {
+          Normal: ((normalCount / totalNSP) * 100).toFixed(1),
+          Suspect: ((suspectCount / totalNSP) * 100).toFixed(1),
+          Pathological: ((pathologicalCount / totalNSP) * 100).toFixed(1),
+        }
+      : { Normal: 0, Suspect: 0, Pathological: 0 };
+
+    res.json({
+      daily,
+      weekly,
+      monthly,
+      yearly,
+      nspStats: {
+        Normal: normalCount,
+        Suspect: suspectCount,
+        Pathological: pathologicalCount,
+      },
+      nspPercentages,
+      totalScans: daily + weekly + monthly + yearly, // or total NSP scans if needed
+    });
   } catch (error) {
     console.error("Error getting stats:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
+
+
+
 
 module.exports = { createScan, listScans, getStats };
