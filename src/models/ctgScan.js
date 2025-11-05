@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+import mongoose from "mongoose";
 
 const ctgScanSchema = new mongoose.Schema({
   imageUrl: String,
@@ -6,4 +6,6 @@ const ctgScanSchema = new mongoose.Schema({
   date: { type: Date, default: Date.now },
 });
 
-module.exports = mongoose.model("CTGScan", ctgScanSchema);
+const CTGScan = mongoose.model("CTGScan", ctgScanSchema);
+
+export default CTGScan;

@@ -1,5 +1,6 @@
 import "dotenv/config.js";
 import connectDB from "../src/config/db.js";
+
 import User from "../src/models/User.js";
 
 await connectDB();

@@ -1,15 +1,18 @@
-const express = require("express");
-const multer = require("multer");
-const { storage } = require("../config/cloudinary");
-const { createScan, listScans, getStats } = require("../controllers/scanController");
+import express from "express";
+import multer from "multer";
+import { storage } from "../config/cloudinary.js";
+import { createScan, listScans, getStats } from "../controllers/scanController.js";
 
 const router = express.Router();
 const upload = multer({ storage });
 
-// ✅ Make sure the field name matches the frontend exactly:
+// 🟢 Route for uploading CTG image
 router.post("/postCTG", upload.single("ctgImage"), createScan);
 
+// 🟡 Route for listing all scans
 router.get("/scans", listScans);
+
+// 🔵 Route for stats
 router.get("/scans/stats", getStats);
 
-module.exports = router;
+export default router;
