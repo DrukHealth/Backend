@@ -1,26 +1,42 @@
 # ==========================================
-# server.py — Druk Health CTG AI Backend (FINAL NO-API PREFIX)
+# server.py — Druk Health CTG AI Backend (FINAL - Using drukhealth.ctgscans + Cloudinary)
 # ==========================================
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime
+from datetime import datetime, timedelta
 from pymongo import MongoClient
+from bson import ObjectId
 import pandas as pd
 import numpy as np
-import cv2, tempfile, joblib, os
+import tempfile
+import joblib
+import cv2
+import os
 from scipy.signal import find_peaks
 from collections import Counter
+import cloudinary
+import cloudinary.uploader
+from dotenv import load_dotenv
+
+# ------------------------------
+# Load environment (optional)
+# ------------------------------
+load_dotenv()
 
 # ------------------------------
 # Initialize FastAPI app
 # ------------------------------
 app = FastAPI(title="Druk Health CTG AI Backend")
 
+origins = [
+    "http://localhost:5173",
+    "https://drukehealthzhiwactg.vercel.app",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],  # React frontend origin
-    allow_credentials=True,
+    allow_origins=origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -29,8 +45,21 @@ app.add_middleware(
 # MongoDB connection
 # ------------------------------
 client = MongoClient("mongodb://localhost:27017")
-db = client["ctg_db"]
-ctg_collection = db["ctg_records"]
+db = client["drukhealth"]
+ctg_collection = db["ctgscans"]  # ✅ store everything here
+
+# ------------------------------
+# Cloudinary Config
+# ------------------------------
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME", "dgclndz9b")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY", "522272821951884")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET", "gGICVeYwIKD02hW0weemvE1Ju98")
+
+cloudinary.config(
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY,
+    api_secret=CLOUDINARY_API_SECRET
+)
 
 # ------------------------------
 # Load trained model
@@ -82,7 +111,7 @@ def extract_ctg_signals(image_path, fhr_top_ratio=0.55, bpm_per_cm=30,
 
 
 def compute_model_features(fhr_signal, uc_signal, time_axis):
-    """Compute SisPorto-style features for classification."""
+    """Compute SisPorto-style features for CTG classification."""
     features = {}
     duration = time_axis[-1] - time_axis[0]
     baseline = np.mean(fhr_signal)
@@ -148,7 +177,6 @@ def compute_model_features(fhr_signal, uc_signal, time_axis):
         fhr_signal[-1] - fhr_signal[0], 2
     )
 
-    # Fill missing features for model
     for col in model_ctg_class.feature_names_in_:
         if col not in features:
             features[col] = 0
@@ -163,59 +191,107 @@ def compute_model_features(fhr_signal, uc_signal, time_axis):
 def home():
     return {"message": "CTG AI Prediction API is running 🚀"}
 
-
+# -------------------------------------------------------
+# PREDICT & SAVE (NOW WITH IMAGE UPLOAD)
+# -------------------------------------------------------
 @app.post("/predict/")
 async def predict_ctg(file: UploadFile = File(...)):
-    """Upload CTG image → classify → save to MongoDB"""
+    """Upload CTG image → extract features → predict → upload to Cloudinary → store in MongoDB"""
     contents = await file.read()
     with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
         tmp.write(contents)
         tmp_path = tmp.name
 
     try:
+        # --- Extract + Predict ---
         fhr, uc, t = extract_ctg_signals(tmp_path)
         features = compute_model_features(fhr, uc, t)
         df = pd.DataFrame([features])[model_ctg_class.feature_names_in_]
         pred = model_ctg_class.predict(df)[0]
         label = {1: "Normal", 2: "Suspect", 3: "Pathologic"}.get(pred, "Unknown")
 
+        # --- Upload to Cloudinary ---
+        upload_result = cloudinary.uploader.upload(tmp_path, folder="drukhealth_ctg")
+        image_url = upload_result.get("secure_url")
+
+        # --- Store in MongoDB ---
         record = {
-            "timestamp": datetime.utcnow(),
+            "timestamp": datetime.utcnow() + timedelta(hours=6),
+            "ctgDetected": label,
+            "features": features,
+            "imageUrl": image_url
+        }
+        result = ctg_collection.insert_one(record)
+        print(f"✅ Saved record {result.inserted_id} ({label})")
+
+        return {
+            "prediction": int(pred),
             "label": label,
             "features": features,
+            "imageUrl": image_url,
+            "record_id": str(result.inserted_id),
         }
-        ctg_collection.insert_one(record)
 
-        print(f"✅ Prediction: {label}")
-        return {"prediction": int(pred), "label": label, "features": features}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
-
+# -------------------------------------------------------
+# GET ALL RECORDS
+# -------------------------------------------------------
 @app.get("/records")
 def get_records():
-    """Return all prediction records"""
-    records = list(ctg_collection.find({}, {"_id": 0}).sort("timestamp", -1))
-    return {"records": records}
+    """Return all stored CTG scan records (with image + features only)."""
+    try:
+        records = list(ctg_collection.find().sort("timestamp", -1))
+        formatted = []
+        for rec in records:
+            if rec.get("features") and rec.get("imageUrl"):
+                formatted.append({
+                    "id": str(rec["_id"]),
+                    "timestamp": rec.get("timestamp"),
+                    "ctgDetected": rec.get("ctgDetected", "Unknown"),
+                    "features": rec.get("features", {}),
+                    "imageUrl": rec.get("imageUrl", "")
+                })
+        return {"records": formatted}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
+# -------------------------------------------------------
+# DELETE RECORD
+# -------------------------------------------------------
+@app.delete("/records/{record_id}")
+def delete_record(record_id: str):
+    try:
+        result = ctg_collection.delete_one({"_id": ObjectId(record_id)})
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Record not found")
+        return {"detail": "Record deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
+# -------------------------------------------------------
+# DASHBOARD ANALYSIS
+# -------------------------------------------------------
 @app.get("/api/analysis")
 def get_analysis():
-    """Return summary stats for dashboard"""
+    """Return summary stats for dashboard charts."""
     records = list(ctg_collection.find({}, {"_id": 0}))
     if not records:
         return {"predictions": [], "nspStats": {"Normal": 0, "Suspect": 0, "Pathologic": 0}}
 
     df = pd.DataFrame(records)
     df["date"] = pd.to_datetime(df["timestamp"]).dt.strftime("%Y-%m-%d")
-
-    pivot = df.pivot_table(index="date", columns="label", aggfunc="size", fill_value=0).reset_index()
+    pivot = df.pivot_table(index="date", columns="ctgDetected", aggfunc="size", fill_value=0).reset_index()
     pivot = pivot.rename_axis(None, axis=1)
     pivot = pivot.rename(columns={"Normal": "N", "Suspect": "S", "Pathologic": "P"})
     time_series = pivot.to_dict(orient="records")
 
-    counts = Counter(df["label"])
+    counts = Counter(df["ctgDetected"])
     nspStats = {
         "Normal": int(counts.get("Normal", 0)),
         "Suspect": int(counts.get("Suspect", 0)),
@@ -223,7 +299,6 @@ def get_analysis():
     }
 
     return {"predictions": time_series, "nspStats": nspStats}
-
 
 # =======================================================
 # Run server
