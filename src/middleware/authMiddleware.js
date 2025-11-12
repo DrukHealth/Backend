@@ -1,50 +1,38 @@
-import jwt from "jsonwebtoken";
-import Admin from "../models/managementModel.js";
-import User from "../models/User.js"; // ✅ import super admin model
+// import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || "mySuperSecretKey";
+// const JWT_SECRET = process.env.JWT_SECRET || "mySuperSecretKey";
 
-export const protect = async (req, res, next) => {
-  try {
-    let token;
+// export const authenticateToken = (req, res, next) => {
+//   const authHeader = req.headers['authorization'];
+//   const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
 
-    // ✅ Extract Bearer token
-    if (req.headers.authorization?.startsWith("Bearer ")) {
-      token = req.headers.authorization.split(" ")[1];
-    }
+//   if (!token) {
+//     return res.status(401).json({
+//       success: false,
+//       message: "Access token required"
+//     });
+//   }
 
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: "Not authorized — token missing",
-      });
-    }
+//   jwt.verify(token, JWT_SECRET, (err, user) => {
+//     if (err) {
+//       return res.status(403).json({
+//         success: false,
+//         message: "Invalid or expired token"
+//       });
+//     }
+    
+//     req.user = user;
+//     next();
+//   });
+// };
 
-    // ✅ Verify JWT
-    const decoded = jwt.verify(token, JWT_SECRET);
-
-    // ✅ Try to find in both collections
-    let admin = await Admin.findById(decoded.id).select("-password");
-    if (!admin) {
-      const superAdmin = await User.findById(decoded.id).select("-password");
-      if (!superAdmin) {
-        return res.status(401).json({
-          success: false,
-          message: "Admin not found — token invalid",
-        });
-      }
-      req.admin = superAdmin;
-    } else {
-      req.admin = admin;
-    }
-
-    next();
-  } catch (error) {
-    console.error("❌ Auth error:", error);
-    res.status(401).json({
-      success: false,
-      message: "Not authorized — invalid or expired token",
-      error: error.message,
-    });
-  }
-};
+// export const requireAdmin = (req, res, next) => {
+//   if (req.user && req.user.role === 'ADMIN') {
+//     next();
+//   } else {
+//     return res.status(403).json({
+//       success: false,
+//       message: "Admin access required"
+//     });
+//   }
+// };
