@@ -1,22 +1,19 @@
 import express from "express";
 import {
   registerAdmin,
-  loginAdmin,
   getAdmins,
   getAdminById,
   updateAdmin,
-  deleteAdmin,
+  deleteAdmin
 } from "../controllers/managementController.js";
-import { protect } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-router.post("/register", registerAdmin); // Public — only used to seed new admin
-router.post("/login", loginAdmin);       // Public — returns JWT token
-
-router.get("/", protect, getAdmins);          // List all admins
-router.get("/:id", protect, getAdminById);    // Get one admin by ID
-router.put("/:id", protect, updateAdmin);     // Update admin details
-router.delete("/:id", protect, deleteAdmin);  // Delete admin
+// Make sure these routes match what your frontend is calling
+router.post("/register", registerAdmin);
+router.get("/", getAdmins);
+router.get("/:id", getAdminById);
+router.put("/:id", updateAdmin);
+router.delete("/:id", deleteAdmin);
 
 export default router;

@@ -43,8 +43,7 @@ app.use(express.urlencoded({ extended: true }));
 // ✅ Routes
 app.use("/api", scanRoutes);
 app.use("/auth", authRoutes);
-app.use("/api/management", managementRoutes);
-console.log("✅ Management routes loaded at /api/management");
+app.use("/api/manage", managementRoutes);
 
 // ✅ MongoDB
 mongoose
