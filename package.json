@@ -2,7 +2,7 @@
   "name": "druk-health-backend",
   "version": "1.0.0",
   "description": "Backend for Druk Health CTG AI system",
-  "type": "module",                              
+  "type": "module",
   "scripts": {
     "dev": "nodemon server.js",
     "start": "node server.js",
@@ -17,6 +17,7 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "moment": "^2.30.1",
+    "mongodb": "^7.0.0",
     "mongoose": "^8.6.0",
     "morgan": "^1.10.0",
     "multer": "^2.0.2",
