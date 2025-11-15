@@ -5,7 +5,6 @@ import mongoose from "mongoose";
 import cors from "cors";
 import http from "http";
 import { Server } from "socket.io";
-
 import scanRoutes from "./src/routes/scanRoutes.js";
 import authRoutes from "./src/routes/authRoutes.js";
 import managementRoutes from "./src/routes/managementRoutes.js";
@@ -18,7 +17,7 @@ const io = new Server(server, {
     origin: [
       "http://localhost:5173",
       "http://127.0.0.1:5173",
-      "https://drukhealthrf.vercel.app"
+      "https://drukhealthrfh.vercel.app"
     ],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
@@ -29,7 +28,7 @@ app.use(cors({
   origin: [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://drukhealthrf.vercel.app"
+    "https://drukhealthrfh.vercel.app"
   ],
   credentials: true,
 }));
