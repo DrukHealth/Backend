@@ -17,7 +17,7 @@ const io = new Server(server, {
     origin: [
       "http://localhost:5173",
       "http://127.0.0.1:5173",
-      "https://drukhealthrfh.vercel.app"
+      "https://drukhealthfe.vercel.app"
     ],
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
@@ -28,7 +28,7 @@ app.use(cors({
   origin: [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
-    "https://drukhealthrfh.vercel.app"
+    "https://drukhealthfe.vercel.app"
   ],
   credentials: true,
 }));
