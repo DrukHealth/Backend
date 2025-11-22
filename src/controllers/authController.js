@@ -1,115 +1,150 @@
+import nodemailer from "nodemailer";
+import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import User from "../models/User.js";
+import Admin from "../models/User.js"; // Admins collection
 
-/**
- * 🧠 Helper: Generate signed JWT token
- */
-const signToken = (userId, role = "SUPER_ADMIN") => {
-  if (!process.env.JWT_SECRET) {
-    console.error("❌ JWT_SECRET missing in environment variables!");
-    throw new Error("Server configuration error: JWT secret not set.");
-  }
-  return jwt.sign({ id: userId, role }, process.env.JWT_SECRET, { expiresIn: "1d" });
-};
+// ----------------------
+// Temporary in-memory OTP store
+// ----------------------
+const otpStore = new Map(); // key = email, value = { otp, expiresAt }
 
-/**
- * 🟢 Login Controller — Super Admin
- */
+// ---------------------- LOGIN ----------------------
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password)
+      return res.status(400).json({ success: false, message: "Email and password required" });
 
-    // 🔍 Validate input
-    if (!email || !password) {
-      return res.status(400).json({
-        success: false,
-        message: "Email and password are required.",
-      });
-    }
+    const user = await Admin.findOne({ email });
+    if (!user || !bcrypt.compareSync(password, user.password))
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
 
-    // 🔎 Find user by email
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
-      });
-    }
+    // JWT token with 30 min expiry
+    const token = jwt.sign(
+      { email: user.email, role: user.role },
+      process.env.JWT_SECRET,
+      { expiresIn: "30m" }
+    );
 
-    // 🔑 Compare password
-    const isMatch = await user.comparePassword(password);
-    if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid email or password.",
-      });
-    }
-
-    // 🪪 Generate JWT
-    const token = signToken(user._id, user.role || "SUPER_ADMIN");
-
-    res.status(200).json({
-      success: true, // ✅ same structure as management login
-      message: "Login successful ✅",
-      token,
-      role: user.role || "SUPER_ADMIN",
-      email: user.email,
-      name: user.name || "",
-    });
-  } catch (error) {
-    console.error("❌ Login error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error during login.",
-      error: error.message,
-    });
+    res.json({ success: true, token, data: { email: user.email, role: user.role } });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
-/**
- * 🟠 Change Password Controller
- */
-export const changePassword = async (req, res) => {
+// ---------------------- FORGOT PASSWORD ----------------------
+export const forgotPassword = async (req, res) => {
   try {
-    const userId = req.user?.id;
-    const { oldPassword, newPassword } = req.body;
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ success: false, message: "Email required" });
 
-    // Validate request
-    if (!userId) {
-      return res
-        .status(401)
-        .json({ success: false, message: "Unauthorized: user not authenticated." });
+    const user = await Admin.findOne({ email });
+    if (!user) return res.status(404).json({ success: false, message: "Admin not found" });
+
+    // Generate OTP and store in memory
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
+    otpStore.set(email, { otp, expiresAt });
+
+    // Send OTP via email
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    });
+
+    await transporter.sendMail({
+      from: process.env.SMTP_USER,
+      to: email,
+      subject: "Druk eHealth OTP Verification",
+      text: `Your OTP is ${otp}. It is valid for 10 minutes.`,
+    });
+
+    res.json({ success: true, message: "OTP sent to email" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ---------------------- VERIFY OTP ----------------------
+export const verifyOtp = (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp)
+      return res.status(400).json({ success: false, message: "Email and OTP required" });
+
+    const record = otpStore.get(email);
+    if (!record) return res.status(400).json({ success: false, message: "OTP not generated" });
+
+    if (record.otp !== otp)
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
+
+    if (Date.now() > record.expiresAt) {
+      otpStore.delete(email); // remove expired OTP
+      return res.status(400).json({ success: false, message: "OTP expired" });
     }
 
-    if (!oldPassword || !newPassword) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Old and new passwords are required." });
-    }
+    // OTP is valid, keep in memory until expiry
+    res.json({ success: true, message: "OTP verified" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found." });
-    }
+// ---------------------- RESET PASSWORD ----------------------
+export const resetPassword = async (req, res) => {
+  try {
+    const { email, newPassword } = req.body;
+    if (!email || !newPassword)
+      return res.status(400).json({ success: false, message: "Email and new password required" });
 
-    const isMatch = await user.comparePassword(oldPassword);
-    if (!isMatch) {
-      return res.status(400).json({ success: false, message: "Old password is incorrect." });
-    }
+    const user = await Admin.findOne({ email });
+    if (!user) return res.status(404).json({ success: false, message: "Admin not found" });
 
-    user.password = newPassword;
+    user.password = bcrypt.hashSync(newPassword, 10);
     await user.save();
 
-    res.status(200).json({
-      success: true,
-      message: "Password changed successfully ✅",
-    });
-  } catch (error) {
-    console.error("❌ Change password error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error while changing password.",
-      error: error.message,
-    });
+    res.json({ success: true, message: "Password reset successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ---------------------- CHANGE PASSWORD ----------------------
+export const changePassword = async (req, res) => {
+  try {
+    const { email, oldPassword, newPassword } = req.body;
+    if (!email || !oldPassword || !newPassword)
+      return res.status(400).json({ success: false, message: "All fields required" });
+
+    const user = await Admin.findOne({ email });
+    if (!user) return res.status(404).json({ success: false, message: "Admin not found" });
+
+    const isMatch = await bcrypt.compare(oldPassword, user.password);
+    if (!isMatch)
+      return res.status(400).json({ success: false, message: "Old password incorrect" });
+
+    user.password = bcrypt.hashSync(newPassword, 10);
+    await user.save();
+
+    res.json({ success: true, message: "Password changed successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+// ---------------------- CLEANUP EXPIRED OTPs ----------------------
+export const cleanupExpiredOtps = () => {
+  try {
+    const now = Date.now();
+    for (const [email, record] of otpStore) {
+      if (record.expiresAt <= now) otpStore.delete(email);
+    }
+  } catch (err) {
+    console.error("Error cleaning expired OTPs:", err);
   }
 };

@@ -1,23 +1,36 @@
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
 
-const userSchema = new mongoose.Schema(
-  {
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
-    name: { type: String, default: "" },
-    role: { type: String, enum: ["SUPER_ADMIN", "ADMIN"], default: "ADMIN", index: true },
-    passwordHash: { type: String, required: true }
+const userSchema = new mongoose.Schema({
+  email: {
+    type: String,
+    required: true,
+    unique: true,
+    lowercase: true,
+    trim: true
   },
-  { timestamps: true }
-);
+  password: {
+    type: String,
+    required: true,
+    minlength: 6
+  },
+  role: {
+    type: String,
+    enum: ["superadmin", "admin"],
+    default: "admin"
+  }
+}, { timestamps: true });
 
-userSchema.methods.setPassword = async function (pwd) {
-  const salt = await bcrypt.genSalt(10);
-  this.passwordHash = await bcrypt.hash(pwd, salt);
-};
+// JSON transform
+userSchema.set("toJSON", {
+  virtuals: true,
+  versionKey: false,
+  transform: function (doc, ret) {
+    ret.id = ret._id;
+    delete ret._id;
+  }
+});
 
-userSchema.methods.comparePassword = function (pwd) {
-  return bcrypt.compare(pwd, this.passwordHash);
-};
+// Force the collection name to 'admins'
+const User = mongoose.model("User", userSchema, "admins");
 
-export default mongoose.model("User", userSchema);
+export default User;

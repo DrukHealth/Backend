@@ -12,12 +12,13 @@ const adminSchema = new mongoose.Schema({
     type: String,
     required: true,
     minlength: 6
+  },
+  role: {
+    type: String,
+    default: "admin" // superadmin will have role: "superadmin"
   }
-}, { 
-  timestamps: true 
-});
+}, { timestamps: true });
 
-// Remove the _id field from JSON output and use id instead
 adminSchema.set('toJSON', {
   virtuals: true,
   versionKey: false,
