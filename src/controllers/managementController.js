@@ -1,212 +1,132 @@
-import Admin from "../models/managementModel.js";
+import User from "../models/User.js";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
+// ----------------------
+// REGISTER ADMIN
+// ----------------------
 export const registerAdmin = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, password, role } = req.body;
 
     if (!email || !password) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Email and password are required" 
-      });
+      return res.status(400).json({ success: false, message: "Email and password are required" });
     }
 
-    const existingAdmin = await Admin.findOne({ email: email.toLowerCase().trim() });
-    if (existingAdmin) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Admin already exists" 
-      });
+    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
+    if (existingUser) {
+      return res.status(400).json({ success: false, message: "User already exists" });
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
-    const admin = new Admin({
+    const user = new User({
       email: email.toLowerCase().trim(),
-      password: hashedPassword
+      password: hashedPassword,
+      role: role || "admin"
     });
 
-    await admin.save();
+    await user.save();
 
-    res.status(201).json({
-      success: true,
-      message: "Admin registered successfully",
-      data: {
-        id: admin._id,
-        email: admin.email,
-        createdAt: admin.createdAt
-      }
+    res.status(201).json({ 
+      success: true, 
+      message: "Admin registered successfully", 
+      data: { id: user._id, email: user.email, role: user.role } 
     });
   } catch (error) {
     console.error("Error registering admin:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error during registration",
-      error: error.message 
-    });
+    res.status(500).json({ success: false, message: "Server error during registration", error: error.message });
   }
 };
 
-export const getAdmins = async (req, res) => {
-  try {
-    const admins = await Admin.find()
-      .select("-password")
-      .sort({ createdAt: -1 });
-    
-    res.json({
-      success: true,
-      count: admins.length,
-      data: admins
-    });
-  } catch (error) {
-    console.error("Error fetching admins:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while fetching admins",
-      error: error.message 
-    });
-  }
-};
-
-export const getAdminById = async (req, res) => {
-  try {
-    const admin = await Admin.findById(req.params.id).select("-password");
-    if (!admin) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin not found" 
-      });
-    }
-
-    res.json({ 
-      success: true, 
-      data: admin 
-    });
-  } catch (error) {
-    console.error("Error fetching admin:", error);
-    if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid admin ID" 
-      });
-    }
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while retrieving admin",
-      error: error.message 
-    });
-  }
-};
-
-export const updateAdmin = async (req, res) => {
+// ----------------------
+// LOGIN ADMIN
+// ----------------------
+export const loginAdmin = async (req, res) => {
   try {
     const { email, password } = req.body;
-    const adminId = req.params.id;
-
-    // Validate ID format
-    if (!adminId.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid admin ID format" 
-      });
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: "Email and password required" });
     }
 
-    const admin = await Admin.findById(adminId);
-    if (!admin) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin not found" 
-      });
-    }
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) return res.status(401).json({ success: false, message: "Invalid email or password" });
 
-    if (email) {
-      const existingAdmin = await Admin.findOne({ 
-        email: email.toLowerCase().trim(),
-        _id: { $ne: adminId }
-      });
-      
-      if (existingAdmin) {
-        return res.status(400).json({ 
-          success: false, 
-          message: "Email already exists" 
-        });
-      }
-      
-      admin.email = email.toLowerCase().trim();
-    }
-    
-    if (password && password.trim() !== '') {
-      const salt = await bcrypt.genSalt(10);
-      admin.password = await bcrypt.hash(password, salt);
-    }
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(401).json({ success: false, message: "Invalid email or password" });
 
-    await admin.save();
+    const token = jwt.sign(
+      { id: user._id, email: user.email, role: user.role },
+      process.env.JWT_SECRET || "supersecretkey",
+      { expiresIn: "7d" }
+    );
 
-    res.json({
-      success: true,
-      message: "Admin updated successfully",
-      data: {
-        id: admin._id,
-        email: admin.email,
-        updatedAt: admin.updatedAt
-      }
-    });
+    res.json({ success: true, token, data: { id: user._id, email: user.email, role: user.role } });
   } catch (error) {
-    console.error("Error updating admin:", error);
-    if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid admin ID" 
-      });
-    }
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while updating admin",
-      error: error.message 
-    });
+    console.error("Error logging in admin:", error);
+    res.status(500).json({ success: false, message: "Server error during login", error: error.message });
   }
 };
 
+// ----------------------
+// GET ALL ADMINS (superadmin only)
+// ----------------------
+export const getAdmins = async (req, res) => {
+  try {
+    const admins = await User.find({ role: { $in: ["admin", "superadmin"] } })
+                             .select("-password")
+                             .sort({ createdAt: -1 });
+    res.json({ success: true, count: admins.length, data: admins });
+  } catch (error) {
+    console.error("Error fetching admins:", error);
+    res.status(500).json({ success: false, message: "Server error while fetching admins", error: error.message });
+  }
+};
+
+// ----------------------
+// UPDATE ADMIN
+// ----------------------
+export const updateAdmin = async (req, res) => {
+  try {
+    const { email, password, role } = req.body;
+    const adminId = req.params.id;
+
+    const user = await User.findById(adminId);
+    if (!user) return res.status(404).json({ success: false, message: "Admin not found" });
+
+    if (email) {
+      const existingUser = await User.findOne({ email: email.toLowerCase().trim(), _id: { $ne: adminId } });
+      if (existingUser) return res.status(400).json({ success: false, message: "Email already exists" });
+      user.email = email.toLowerCase().trim();
+    }
+
+    if (password && password.trim() !== "") {
+      user.password = await bcrypt.hash(password, 10);
+    }
+
+    if (role) user.role = role;
+
+    await user.save();
+    res.json({ success: true, message: "Admin updated successfully", data: { id: user._id, email: user.email, role: user.role } });
+  } catch (error) {
+    console.error("Error updating admin:", error);
+    res.status(500).json({ success: false, message: "Server error while updating admin", error: error.message });
+  }
+};
+
+// ----------------------
+// DELETE ADMIN
+// ----------------------
 export const deleteAdmin = async (req, res) => {
   try {
     const adminId = req.params.id;
+    const user = await User.findById(adminId);
+    if (!user) return res.status(404).json({ success: false, message: "Admin not found" });
 
-    // Validate ID format
-    if (!adminId.match(/^[0-9a-fA-F]{24}$/)) {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid admin ID format" 
-      });
-    }
-
-    const admin = await Admin.findById(adminId);
-    if (!admin) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Admin not found" 
-      });
-    }
-
-    await Admin.findByIdAndDelete(adminId);
-
-    res.json({
-      success: true,
-      message: "Admin deleted successfully"
-    });
+    await User.findByIdAndDelete(adminId);
+    res.json({ success: true, message: "Admin deleted successfully" });
   } catch (error) {
     console.error("Error deleting admin:", error);
-    if (error.name === 'CastError') {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Invalid admin ID" 
-      });
-    }
-    res.status(500).json({ 
-      success: false, 
-      message: "Server error while deleting admin",
-      error: error.message 
-    });
+    res.status(500).json({ success: false, message: "Server error while deleting admin", error: error.message });
   }
 };
