@@ -15,10 +15,15 @@ const adminSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    default: "admin" // superadmin will have role: "superadmin"
+    enum: ["admin", "super_admin"],
+    default: "admin",
+    required: true
   }
-}, { timestamps: true });
+}, { 
+  timestamps: true 
+});
 
+// Remove the _id field from JSON output and use id instead
 adminSchema.set('toJSON', {
   virtuals: true,
   versionKey: false,

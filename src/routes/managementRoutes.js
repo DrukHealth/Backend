@@ -1,15 +1,33 @@
 import express from "express";
-import { registerAdmin, loginAdmin, getAdmins, updateAdmin, deleteAdmin } from "../controllers/managementController.js";
+import {
+  registerAdmin,
+  getAdmins,
+  getAdminById,
+  updateAdmin,
+  deleteAdmin,
+  checkSuperAdminExistence,
+  requireSuperAdmin,
+  allowFirstTimeRegistration,
+  loginAdmin,
+  getCurrentAdmin
+} from "../controllers/managementController.js";
 
 const router = express.Router();
 
-// Admin login
+// Public routes
+router.get("/super-admin-exists", checkSuperAdminExistence);
 router.post("/login", loginAdmin);
 
-// CRUD for admins
-router.post("/register", registerAdmin);
+// Registration - allows first-time without auth, requires super admin after
+router.post("/register", allowFirstTimeRegistration, registerAdmin);
+
+// Get current admin profile
+router.get("/profile/me", getCurrentAdmin);
+
+// Protected routes (require super admin for write operations after first setup)
 router.get("/", getAdmins);
-router.put("/:id", updateAdmin);
-router.delete("/:id", deleteAdmin);
+router.get("/:id", getAdminById);
+router.put("/:id", requireSuperAdmin, updateAdmin);
+router.delete("/:id", requireSuperAdmin, deleteAdmin);
 
 export default router;

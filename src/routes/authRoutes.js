@@ -1,35 +1,19 @@
 import express from "express";
-import {
-  login,
-  forgotPassword,
-  verifyOtp,
-  resetPassword,
-  changePassword,
-  cleanupExpiredOtps, // optional
+import { 
+  login, 
+  changePassword, 
+  sendOtp, 
+  verifyOtp, 
+  resetPassword 
 } from "../controllers/authController.js";
 
 const router = express.Router();
 
-// ----------------------
-// Auth routes
-// ----------------------
-
-// Login route
-router.post("/login", login);
-
-// Forgot Password (send OTP)
-router.post("/forgot-password", forgotPassword);
-
-// Verify OTP
-router.post("/verify-otp", verifyOtp);
-
-// Reset password after OTP verification
-router.post("/reset-password", resetPassword);
-
-// Change password for logged-in user
-router.post("/change-password", changePassword);
-
-// Optional: Cleanup expired OTPs from memory
-router.get("/cleanup-otps", cleanupExpiredOtps);
+// 🔐 Authentication routes
+router.post("/login", login);                  // Login
+router.post("/change-password", changePassword); // Change password (authenticated)
+router.post("/forgot-password", sendOtp);      // Request OTP for password reset
+router.post("/verify-otp", verifyOtp);        // Verify OTP
+router.post("/reset-password", resetPassword); // Reset password after OTP verified
 
 export default router;
