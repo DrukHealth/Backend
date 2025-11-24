@@ -1,26 +1,19 @@
-// src/controllers/scanController.js
 import CTGScan from "../models/ctgScan.js";
 import moment from "moment";
 
-// -------------------------
-// POST /api/postCTG
-// Upload a CTG scan image
-// -------------------------
+// 🟢 POST /api/postCTG
 export const createScan = async (req, res) => {
   try {
     if (!req.file || !req.file.path) {
       return res.status(400).json({ message: "No image uploaded" });
     }
 
-    // Get detection result from body or default to "Normal"
     const ctgDetected = req.body.result || "Normal";
     const imageUrl = req.file.path;
 
-    // Save scan in database
     const scan = new CTGScan({ imageUrl, ctgDetected });
     await scan.save();
 
-    // Emit via Socket.IO to all connected clients
     const io = req.app.get("io");
     if (io) io.emit("new-scan", scan);
 
@@ -34,10 +27,7 @@ export const createScan = async (req, res) => {
   }
 };
 
-// -------------------------
-// GET /api/scans
-// List all scans
-// -------------------------
+// 🟡 GET /api/scans
 export const listScans = async (req, res) => {
   try {
     const scans = await CTGScan.find().sort({ date: -1 });
@@ -48,10 +38,7 @@ export const listScans = async (req, res) => {
   }
 };
 
-// -------------------------
-// GET /api/scans/stats
-// Get CTG scan statistics
-// -------------------------
+// 🔵 GET /api/scans/stats
 export const getStats = async (req, res) => {
   try {
     const now = moment();
@@ -68,7 +55,6 @@ export const getStats = async (req, res) => {
     const startOfYear = now.clone().startOf("year").toDate();
     const endOfYear = now.clone().endOf("year").toDate();
 
-    // Count scans for different time ranges
     const [daily, weekly, monthly, yearly] = await Promise.all([
       CTGScan.countDocuments({ date: { $gte: startOfDay, $lte: endOfDay } }),
       CTGScan.countDocuments({ date: { $gte: startOfWeek, $lte: endOfWeek } }),
@@ -76,7 +62,6 @@ export const getStats = async (req, res) => {
       CTGScan.countDocuments({ date: { $gte: startOfYear, $lte: endOfYear } }),
     ]);
 
-    // Count scans by type
     const [normalCount, suspectCount, pathologicalCount] = await Promise.all([
       CTGScan.countDocuments({ ctgDetected: "Normal" }),
       CTGScan.countDocuments({ ctgDetected: "Suspect" }),
@@ -85,7 +70,6 @@ export const getStats = async (req, res) => {
 
     const totalNSP = normalCount + suspectCount + pathologicalCount;
 
-    // Calculate percentages
     const nspPercentages = totalNSP
       ? {
           Normal: ((normalCount / totalNSP) * 100).toFixed(1),
