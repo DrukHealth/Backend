@@ -1,12 +1,24 @@
+// controllers/authController.js
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import nodemailer from "nodemailer";
 import Admin from "../models/managementModel.js";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+const DEBUG_LOG_OTPS = process.env.DEBUG_LOG_OTPS === "true"; // set true only in dev
 
 // --------------------
-// Temporary OTP storage
+// OTP store with expiry + cooldown
+// Structure: otpStore.set(email, { otp, expiresAt: Date, cooldownUntil: Date, timeoutId })
 // --------------------
 const otpStore = new Map();
+
+/** helper to normalize email */
+function normalizeEmail(raw) {
+  return (raw || "").toString().trim().toLowerCase();
+}
 
 // --------------------
 // Nodemailer Transport
@@ -15,40 +27,25 @@ const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: process.env.GMAIL_USER,
-    pass: process.env.GMAIL_PASS,
+    pass: process.env.GMAIL_PASS, // must be app password with NO spaces
   },
+});
+
+// Verify SMTP config at startup (logs error if bad)
+transporter.verify((err, success) => {
+  if (err) {
+    console.error("[authController] SMTP verify failed:", err);
+  } else {
+    console.log("[authController] SMTP ready");
+  }
 });
 
 // --------------------
 // JWT token generator
 // --------------------
-const signToken = (adminId, role = "ADMIN") => {
+const signToken = (adminId, role = "admin") => {
   if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET missing in .env");
   return jwt.sign({ id: adminId, role }, process.env.JWT_SECRET, { expiresIn: "1d" });
-};
-
-// --------------------
-// Password comparison helper
-// --------------------
-Admin.prototype.comparePassword = async function (password) {
-  return await bcrypt.compare(password, this.password);
-};
-
-// --------------------
-// Middleware: verify token
-// --------------------
-export const verifyToken = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ message: "No token provided" });
-
-  const token = authHeader.split(" ")[1];
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    next();
-  } catch (err) {
-    return res.status(403).json({ message: "Invalid or expired token" });
-  }
 };
 
 // --------------------
@@ -56,53 +53,66 @@ export const verifyToken = (req, res, next) => {
 // --------------------
 export const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) return res.status(400).json({ success: false, message: "Email & password required" });
+    const { email: rawEmail, password } = req.body;
+    const email = normalizeEmail(rawEmail);
+
+    if (!email || !password) {
+      return res.status(400).json({ success: false, message: "Email & password required" });
+    }
 
     const admin = await Admin.findOne({ email });
-    if (!admin) return res.status(401).json({ success: false, message: "Invalid email or password" });
+    if (!admin) {
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
+    }
 
-    const isMatch = await admin.comparePassword(password);
-    if (!isMatch) return res.status(401).json({ success: false, message: "Invalid email or password" });
+    const isMatch = await bcrypt.compare(password, admin.password);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: "Invalid email or password" });
+    }
 
-    const token = signToken(admin._id, admin.role || "ADMIN");
+    const token = signToken(admin._id, admin.role || "admin");
 
-    res.status(200).json({
+    // Consistent shape with `data` object for frontend compatibility
+    return res.status(200).json({
       success: true,
-      message: "Login successful ✅",
+      message: "Login successful",
       token,
-      role: admin.role || "ADMIN",
-      email: admin.email,
-      name: admin.name || "",
+      data: {
+        email: admin.email,
+        role: admin.role || "admin",
+        name: admin.name || "",
+      },
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("[login] error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
 // --------------------
-// Change Password
+// Change Password (authenticated)
 // --------------------
 export const changePassword = async (req, res) => {
   try {
     const adminId = req.user?.id;
     const { oldPassword, newPassword } = req.body;
+
     if (!adminId) return res.status(401).json({ success: false, message: "Unauthorized" });
+    if (!oldPassword || !newPassword) return res.status(400).json({ success: false, message: "Old & new password required" });
 
     const admin = await Admin.findById(adminId);
     if (!admin) return res.status(404).json({ success: false, message: "Admin not found" });
 
-    const isMatch = await admin.comparePassword(oldPassword);
+    const isMatch = await bcrypt.compare(oldPassword, admin.password);
     if (!isMatch) return res.status(400).json({ success: false, message: "Old password incorrect" });
 
     admin.password = await bcrypt.hash(newPassword, 10);
     await admin.save();
 
-    res.status(200).json({ success: true, message: "Password changed ✅" });
+    return res.status(200).json({ success: true, message: "Password changed" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: "Server error" });
+    console.error("[changePassword] error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 
@@ -111,27 +121,59 @@ export const changePassword = async (req, res) => {
 // --------------------
 export const sendOtp = async (req, res) => {
   try {
-    const { email } = req.body;
+    const email = normalizeEmail(req.body?.email);
     if (!email) return res.status(400).json({ success: false, message: "Email required" });
 
     const admin = await Admin.findOne({ email });
-    if (!admin) return res.status(404).json({ success: false, message: "No admin found with this email" });
+    if (!admin) {
+      // avoid email enumeration: you can return 200 and generic message, but here we return 404 so frontend can show message
+      return res.status(404).json({ success: false, message: "No admin found with this email" });
+    }
 
-    const otp = Math.floor(100000 + Math.random() * 900000);
-    otpStore.set(email, otp);
+    const now = Date.now();
+    const existing = otpStore.get(email);
 
-    await transporter.sendMail({
+    // prevent flooding: 60s cooldown
+    if (existing && existing.cooldownUntil && existing.cooldownUntil > now) {
+      const waitSec = Math.ceil((existing.cooldownUntil - now) / 1000);
+      return res.status(429).json({ success: false, message: `Please wait ${waitSec}s before requesting another OTP` });
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit string
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes
+    const cooldownUntil = Date.now() + 60 * 1000; // 60s before new OTP allowed
+
+    // schedule cleanup
+    const timeoutId = setTimeout(() => {
+      otpStore.delete(email);
+    }, 5 * 60 * 1000 + 5000); // small buffer
+
+    // store otp entry (replace previous)
+    otpStore.set(email, { otp, expiresAt, cooldownUntil, timeoutId });
+
+    // send mail
+    const mailOptions = {
       from: `"Druk Health" <${process.env.GMAIL_USER}>`,
       to: email,
-      subject: "Your OTP for Druk Health",
-      html: `<p>Your OTP is: <b>${otp}</b></p><p>It expires in 5 minutes.</p>`,
-    });
+      subject: "Druk Health — Your OTP",
+      html: `<p>Your OTP code: <strong>${otp}</strong></p><p>It will expire in 5 minutes.</p>`,
+    };
 
-    console.log(`🔐 OTP sent to ${email}: ${otp}`);
-    res.status(200).json({ success: true, message: "OTP sent to email" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: "Server error sending OTP" });
+    try {
+      await transporter.sendMail(mailOptions);
+      if (DEBUG_LOG_OTPS) console.log(`[sendOtp] OTP for ${email}: ${otp}`);
+    } catch (smtpErr) {
+      // cleanup if sending failed
+      clearTimeout(timeoutId);
+      otpStore.delete(email);
+      console.error("[sendOtp] SMTP error:", smtpErr);
+      return res.status(500).json({ success: false, message: "Failed to deliver OTP email" });
+    }
+
+    return res.status(200).json({ success: true, message: "OTP sent to email" });
+  } catch (err) {
+    console.error("[sendOtp] error:", err);
+    return res.status(500).json({ success: false, message: "Server error sending OTP" });
   }
 };
 
@@ -140,16 +182,32 @@ export const sendOtp = async (req, res) => {
 // --------------------
 export const verifyOtp = (req, res) => {
   try {
-    const { email, otp } = req.body;
-    const correctOtp = otpStore.get(email);
+    const email = normalizeEmail(req.body?.email);
+    const otp = (req.body?.otp || "").toString().trim();
 
-    if (!correctOtp) return res.status(400).json({ success: false, message: "OTP expired or not requested" });
-    if (parseInt(otp) !== correctOtp) return res.status(400).json({ success: false, message: "Invalid OTP" });
+    if (!email || !otp) return res.status(400).json({ success: false, message: "Email & OTP required" });
 
-    res.status(200).json({ success: true, message: "OTP verified ✅" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: "Server error verifying OTP" });
+    const entry = otpStore.get(email);
+    if (!entry) return res.status(400).json({ success: false, message: "OTP expired or not requested" });
+
+    if (Date.now() > entry.expiresAt) {
+      // cleanup
+      clearTimeout(entry.timeoutId);
+      otpStore.delete(email);
+      return res.status(400).json({ success: false, message: "OTP expired" });
+    }
+
+    if (entry.otp !== otp) return res.status(400).json({ success: false, message: "Invalid OTP" });
+
+    // Optionally issue a short lived reset token, but for now we'll just return success
+    // Remove OTP to prevent reuse
+    clearTimeout(entry.timeoutId);
+    otpStore.delete(email);
+
+    return res.status(200).json({ success: true, message: "OTP verified" });
+  } catch (err) {
+    console.error("[verifyOtp] error:", err);
+    return res.status(500).json({ success: false, message: "Server error verifying OTP" });
   }
 };
 
@@ -158,17 +216,26 @@ export const verifyOtp = (req, res) => {
 // --------------------
 export const resetPassword = async (req, res) => {
   try {
-    const { email, newPassword } = req.body;
+    const email = normalizeEmail(req.body?.email);
+    const newPassword = (req.body?.newPassword || "").toString();
+
     if (!email || !newPassword) return res.status(400).json({ success: false, message: "Email & new password required" });
 
     const hashed = await bcrypt.hash(newPassword, 10);
-    const admin = await Admin.findOneAndUpdate({ email }, { password: hashed }, { new: true });
+    const admin = await Admin.findOneAndUpdate({ email }, { $set: { password: hashed } }, { new: true });
+
     if (!admin) return res.status(404).json({ success: false, message: "Admin not found" });
 
-    otpStore.delete(email);
-    res.status(200).json({ success: true, message: "Password reset successfully 🎉" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, message: "Server error resetting password" });
+    // remove any OTP entries
+    const entry = otpStore.get(email);
+    if (entry) {
+      clearTimeout(entry.timeoutId);
+      otpStore.delete(email);
+    }
+
+    return res.status(200).json({ success: true, message: "Password reset successfully" });
+  } catch (err) {
+    console.error("[resetPassword] error:", err);
+    return res.status(500).json({ success: false, message: "Server error resetting password" });
   }
 };
