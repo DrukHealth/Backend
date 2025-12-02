@@ -1,14 +1,9 @@
 import dotenv from "dotenv";
-dotenv.config(); // 👈 Ensures .env is loaded even if imported early
+dotenv.config();
 
 import { v2 as cloudinary } from "cloudinary";
-import { CloudinaryStorage } from "multer-storage-cloudinary";
-
-console.log("🔍 Cloudinary ENV Check (from config):", {
-  CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
-  CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY,
-  CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET ? "✅ present" : "❌ missing",
-});
+import pkg from "multer-storage-cloudinary";
+const { CloudinaryStorage } = pkg;
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
