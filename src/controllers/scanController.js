@@ -38,6 +38,21 @@ export const listScans = async (req, res) => {
   }
 };
 
+export const getAllCTGRecords = async (req, res) => {
+  try {
+    const scans = await CTGScan.find().sort({ date: -1 });
+
+    res.json({
+      total: scans.length,
+      records: scans,
+    });
+  } catch (error) {
+    console.error("Error fetching all records:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
 // 🔵 GET /api/scans/stats
 export const getStats = async (req, res) => {
   try {
