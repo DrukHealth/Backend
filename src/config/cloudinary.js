@@ -2,8 +2,11 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import { v2 as cloudinary } from "cloudinary";
-import pkg from "multer-storage-cloudinary";
-const { CloudinaryStorage } = pkg;
+import CloudinaryStoragePkg from "multer-storage-cloudinary";
+
+const CloudinaryStorage = CloudinaryStoragePkg.CloudinaryStorage
+  ? CloudinaryStoragePkg.CloudinaryStorage
+  : CloudinaryStoragePkg;
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
