@@ -12,45 +12,44 @@ import managementRoutes from "./src/routes/managementRoutes.js";
 const app = express();
 const server = http.createServer(app);
 
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "https://drukhealthfrontend.vercel.app"
+];
+
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      "https://drukhealthfrontend.vercel.app"
-    ],
+    origin: allowedOrigins,
     methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   },
 });
 
 app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "https://drukhealthfrontend.vercel.app"
-  ],
+  origin: allowedOrigins,
   credentials: true,
 }));
 
 app.set("io", io);
 
-app.use(cors());
+// ❌ REMOVE THIS LINE
+// app.use(cors());
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ Routes
+// Routes
 app.use("/api", scanRoutes);
 app.use("/auth", authRoutes);
 app.use("/api/manage", managementRoutes);
 
-// ✅ MongoDB
+// MongoDB
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => console.log("✅ MongoDB connected"))
   .catch((err) => console.error("❌ MongoDB connection error:", err));
 
-// ✅ Socket
 io.on("connection", (socket) => {
   console.log("🟢 A client connected:", socket.id);
   socket.on("disconnect", () => console.log("🔴 Client disconnected:", socket.id));
