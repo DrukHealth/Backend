@@ -1,10 +1,17 @@
 import express from "express";
 import multer from "multer";
-import { storage } from "../config/cloudinary.js";
-import { createScan, listScans, getStats, getAllCTGRecords } from "../controllers/scanController.js";
+import cloudinary from "../config/cloudinary.js";
+import {
+  createScan,
+  listScans,
+  getStats,
+  getAllCTGRecords,
+} from "../controllers/scanController.js";
 
 const router = express.Router();
-const upload = multer({ storage });
+
+// Temporary file storage (local)
+const upload = multer({ dest: "uploads/" });
 
 // Upload CTG image
 router.post("/postCTG", upload.single("ctgImage"), createScan);
