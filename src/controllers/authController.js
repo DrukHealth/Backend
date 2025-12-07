@@ -31,6 +31,7 @@ oauth2Client.setCredentials({
 
 // --------------------------
 // Gmail API Email Sender
+
 // --------------------------
 async function sendEmail(to, subject, html) {
   try {
